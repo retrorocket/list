@@ -45,32 +45,43 @@ post '/list' => sub {
 
 	my $list = $nt->create_list({name=>'home_timeline_copy', mode=>'private'});
 	my $num = $list->{id_str};
-	my $hash = $nt->friends_ids({count=>500});
+	my $hash = $nt->friends_ids({count=>4999});
 	my @mem = @{$hash->{ids}};
 
-	my $magic = 20;
+	my $magic = 50;
+	my $count = @mem;
+	#print $count;
 	my $hyaku = int($count / $magic);
 	my $amari = $count % $magic;
+	eval {
 
-	my $i = 0;
-	for($i = 0; $i < $hyaku; $i++){
-		my @temp = @mem[$i*$magic ... (($i+1)*$magic)-1];
-		my $str = join(',', @temp);
-		$nt->add_list_members({list_id=>$num, user_id=>$str});
+		my $i = 0;
+		for($i = 0; $i < $hyaku; $i++){
+			my @temp = @mem[$i*$magic ... (($i+1)*$magic)-1];
+			my $str = join(',', @temp);
+			#print $str;
+			$nt->add_list_members({list_id=>$num, user_id=>$str});
+			sleep 1;
+		}
+
+		if($amari > 0){
+			my @temp = @mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
+			my $str = join(',', @temp);
+			#print $str;
+			$nt->add_list_members({list_id=>$num, user_id=>$str});
+		}
+		$nt->add_list_member({list_id=>$num, screen_name=>$screen_name});
+	};
+	if($@){
+		$self->session( expires => 1 );
+		return  $self->render_json({'result' => $@ . "：処理途中で終了しました"});
 	}
-
-	if($amari > 0){
-		my @temp = @mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
-		my $str = join(',', @temp);
-		$nt->add_list_members({list_id=>$num, user_id=>$str});
-	}
-
 	$self->session( expires => 1 );
-	return  $self->render_json({'result' => "処理が完了しました"}); 
+	return  $self->render_json({'result' => "処理が完了しました"});
 	#セッション削除
 	#$self->render;
-} => 'list';
 
+} => 'list';
 
 # Session削除
 get '/logout' => sub {
