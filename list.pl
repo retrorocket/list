@@ -62,7 +62,7 @@ post '/list' => sub {
 
 	while ($only_count != 0) {
 
-		my $magic = 100;
+		my $magic = 50;
 		my $count = @mem;
 
 		my $hyaku = int($count / $magic);
