@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 use utf8;
-
+#use KCatch;
 use LWP::Protocol::Net::Curl;
 use Net::Twitter::Lite::WithAPIv1_1;
 use Mojolicious::Lite;
@@ -14,18 +14,21 @@ my $consumer_secret = "***";
 my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	consumer_key => $consumer_key,
 	consumer_secret => $consumer_secret,
+	ssl => 1
 );
 
 # Display top page
 get '/' => sub {
 	my $self = shift;
-	$self->redirect_to( 'auth' );
+	my $mode = $self->param('mode') || 'following';
+	$self->redirect_to( '/auth/'.$mode );
 
 } => 'index';
 
-get '/auth' => sub {
+get '/auth/:mode'  => {mode => undef} => sub {
 	my $self = shift;
-	my $cb_url = 'https://retrorocket.biz/list/auth.cgi/auth_cb';
+	my $mode = $self->param('mode') || 'following';
+	my $cb_url = 'https://retrorocket.biz/list/auth.cgi/auth_cb/'.$mode;
 	my $url = $nt->get_authorization_url( callback => $cb_url );
 
 	$self->session( token => $nt->request_token );
@@ -34,8 +37,9 @@ get '/auth' => sub {
 	$self->redirect_to( $url );
 } => 'auth';
 
-get '/auth_cb' => sub {
+get '/auth_cb/:mode' => {mode => undef}  => sub {
 	my $self = shift;
+	my $mode = $self->param('mode') || 'following';
 	my $verifier = $self->param('oauth_verifier') || '';
 	my $token = $self->session('token') || '';
 	my $token_secret = $self->session('token_secret') || '';
@@ -52,7 +56,12 @@ get '/auth_cb' => sub {
 	$self->session( access_token_secret => $access_token_secret );
 	$self->session( screen_name => $screen_name );
 
-	$self->redirect_to( 'https://retrorocket.biz/list/list.cgi' );
+	if($mode ne 'following'){
+		$self->redirect_to( 'https://retrorocket.biz/list/list.cgi?mode=follower' );
+	}
+	else {
+		$self->redirect_to( 'https://retrorocket.biz/list/list.cgi' );
+	}
 } => 'auth_cb';
 
 # Session削除
@@ -66,42 +75,3 @@ app->sessions->secure(1);
 app->secret("***"); # セッション管理のために付けておく
 app->start;
 
-__DATA__
-
-@@ error.html.ep
-<!DOCTYPE html>
-<html lang="ja">
-	<head>
-		<meta charset="utf-8">
-		<title>Upload Twitter icon</title>
-		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-		<!-- Le styles -->
-		<link href="https://retrorocket.biz/list/css/bootstrap.css" rel="stylesheet">
-		<style>
-			body {
-				padding-top: 60px; /* 60px to make the container go all the way to the bottom of the topbar */
-				padding-bottom: 40px;
-			}
-		</style>
-		<link href="https://retrorocket.biz/list/css/bootstrap-responsive.css" rel="stylesheet">
-
-		<!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
-		<!--[if lt IE 9]>
-		<script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
-		<![endif]-->
-
-		<!-- Fav and touch icons -->
-	</head>
-
-	<body>
-
-		<div class="container">
-			<h2>Error</h2>
-			<p>
-			<%= $exception %>
-			</p>
-			<p><a href="http://retrorocket.biz/list/">戻る</a></p>
-		</div> 
-	</body>
-</html>

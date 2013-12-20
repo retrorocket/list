@@ -13,10 +13,10 @@ use List::Compare;
 my $consumer_key ="***";
 my $consumer_secret = "***";
 
-#my $nt = Net::Twitter->new(
 my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	consumer_key => $consumer_key,
 	consumer_secret => $consumer_secret,
+	ssl => 1
 #	legacy_lists_api => 0
 );
 
@@ -29,8 +29,9 @@ get '/' => sub {
 	my $access_token_secret = $self->session( 'access_token_secret' ) || '';
 	my $screen_name = $self->session( 'screen_name' ) || '';
 
+	my $mode = $self->param('mode') || 'following';
 	# セッションにaccess_token/access_token_secretが残ってなければ認証処理へ
-	return $self->redirect_to( 'https://retrorocket.biz/list/auth.cgi' ) unless ($access_token && $access_token_secret);
+	return $self->redirect_to( 'https://retrorocket.biz/list/auth.cgi?mode='.$mode ) unless ($access_token && $access_token_secret);
 	$self->stash('name' => $screen_name);
 
 } => 'index';
@@ -45,16 +46,22 @@ post '/list' => sub {
 
 	# セッションにaccess_tokenが残ってなければ再認証
 	#return $self->redirect_to( 'index' ) unless ($access_token && $access_token_secret);
-	return  $self->render_json({'result' => "Not Authorized"}) unless ($access_token && $access_token_secret);
+	return  $self->render(json =>{'result' => "Not Authorized"}) unless ($access_token && $access_token_secret);
 
 	$nt->access_token( $access_token );
 	$nt->access_token_secret( $access_token_secret );
-
+	my $mode = $self->param('mode') || '';
 	eval {
 
 	my $list = $nt->create_list({name=>'home_timeline_copy', mode=>'private'});
 	my $num = $list->{id_str};
-	my $hash = $nt->friends_ids({count=>4999});
+	my $hash;
+	if($mode eq 'follower'){
+		$hash = $nt->followers_ids({count=>4999});
+	}
+	else {
+		$hash = $nt->friends_ids({count=>4999});
+	}
 	my @mem = @{$hash->{ids}};
 
 	my $only_count = -1;
@@ -119,11 +126,11 @@ post '/list' => sub {
 	};
 	if($@){
 		$self->session( expires => 1 );
-		return $self->render_json({'result' => $@ . "：エラーが発生しました"});
+		return $self->render(json =>{'result' => $@ . "：エラーが発生しました"});
 	}
 
 	$self->session( expires => 1 );
-	return  $self->render_json({'result' => "処理が完了しました"});
+	return  $self->render(json =>{'result' => "処理が完了しました"});
 	#セッション削除
 	#$self->render;
 } => 'list';
