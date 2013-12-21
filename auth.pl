@@ -17,7 +17,7 @@ my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	ssl => 1
 );
 
-# Display top page
+# トップページ
 get '/' => sub {
 	my $self = shift;
 	my $mode = $self->param('mode') || 'following';
@@ -47,11 +47,11 @@ get '/auth_cb/:mode' => {mode => undef}  => sub {
 	$nt->request_token( $token );
 	$nt->request_token_secret( $token_secret );
 
-	# Access token取得
+	# トークン取得
 	my ($access_token, $access_token_secret, $user_id, $screen_name)
-	= $nt->request_access_token( verifier => $verifier );
+		= $nt->request_access_token( verifier => $verifier );
 
-	# Sessionに格納
+	# セッションに格納
 	$self->session( access_token => $access_token );
 	$self->session( access_token_secret => $access_token_secret );
 	$self->session( screen_name => $screen_name );
@@ -64,11 +64,10 @@ get '/auth_cb/:mode' => {mode => undef}  => sub {
 	}
 } => 'auth_cb';
 
-# Session削除
+# セッション削除
 get '/logout' => sub {
 	my $self = shift;
 	$self->session( expires => 1 );
-	#$self->render;
 } => 'logout';
 
 app->sessions->secure(1);

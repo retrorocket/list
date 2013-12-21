@@ -7,7 +7,6 @@ use utf8;
 #use KCatch;
 use Net::Twitter::Lite::WithAPIv1_1;
 use Mojolicious::Lite;
-#use Data::Dumper;
 use List::Compare;
 
 my $consumer_key ="***";
@@ -17,20 +16,19 @@ my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	consumer_key => $consumer_key,
 	consumer_secret => $consumer_secret,
 	ssl => 1
-#	legacy_lists_api => 0
 );
 
-# Display top page
+# トップページ
 get '/' => sub {
 	my $self = shift;
-	#$self->session( expires => 1 );
-	#$self->render;
+
 	my $access_token = $self->session( 'access_token' ) || '';
 	my $access_token_secret = $self->session( 'access_token_secret' ) || '';
 	my $screen_name = $self->session( 'screen_name' ) || '';
 
 	my $mode = $self->param('mode') || 'following';
-	# セッションにaccess_token/access_token_secretが残ってなければ認証処理へ
+
+	#認証処理
 	return $self->redirect_to( 'https://retrorocket.biz/list/auth.cgi?mode='.$mode ) unless ($access_token && $access_token_secret);
 	$self->stash('name' => $screen_name);
 
@@ -44,8 +42,7 @@ post '/list' => sub {
 	my $access_token_secret = $self->session( 'access_token_secret' ) || '';
 	my $screen_name = $self->session( 'screen_name' ) || '';
 
-	# セッションにaccess_tokenが残ってなければ再認証
-	#return $self->redirect_to( 'index' ) unless ($access_token && $access_token_secret);
+	#tokenがないならエラーを返す
 	return  $self->render(json =>{'result' => "Not Authorized"}) unless ($access_token && $access_token_secret);
 
 	$nt->access_token( $access_token );
@@ -67,6 +64,7 @@ post '/list' => sub {
 	my $only_count = -1;
 	$nt->add_list_member({list_id=>$num, screen_name=>$screen_name});
 
+	#全員登録できるまで繰り返す
 	while ($only_count != 0) {
 
 		my $magic = 50;
@@ -129,17 +127,16 @@ post '/list' => sub {
 		return $self->render(json =>{'result' => $@ . "：エラーが発生しました"});
 	}
 
+	#セッション削除
 	$self->session( expires => 1 );
 	return  $self->render(json =>{'result' => "処理が完了しました"});
-	#セッション削除
-	#$self->render;
+
 } => 'list';
 
-# Session削除
+# セッション削除
 get '/logout' => sub {
 	my $self = shift;
 	$self->session( expires => 1 );
-	#$self->render;
 } => 'logout';
 
 app->sessions->secure(1);
