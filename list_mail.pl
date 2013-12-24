@@ -4,7 +4,6 @@ use strict;
 use warnings;
 use utf8;
 
-
 use Net::Twitter::Lite::WithAPIv1_1;
 use Mojolicious::Lite;
 use List::Compare;
