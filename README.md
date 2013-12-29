@@ -1,6 +1,10 @@
 #Timeline Copier - Timeline to List
-##自分のフォローしてる人とフォロワーをリストにコピーするスクリプト
-http://retrorocket.biz/list
+自分のフォローしてる人とフォロワーをリストにコピーするスクリプト  
+http://retrorocket.biz/list  
+
+##動かし方等
+* Mojolicious::LiteとNet::Twitter::Liteがメインで使用しているモジュールですが、リスト作成のメイン部分はMojolicious::Lite無しで動かせます。  
+* ApacheのTimeoutによるプロセスkill回避のためにforkを使用しています。
 
 ##LICENSE
 BSD Licenseの範囲内で使用可能ですが、このソースコードのlist.pl/listメソッドを流用して新たにサービスを作成した場合、サービスのトップページのフッター等に、私（@retrorocket）の名前とこのリポジトリへのリンクを表示してください。
