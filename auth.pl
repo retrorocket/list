@@ -17,18 +17,20 @@ my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	ssl => 1
 );
 
-# トップページ
+# Display top page
 get '/' => sub {
 	my $self = shift;
 	my $mode = $self->param('mode') || 'following';
-	$self->redirect_to( '/auth/'.$mode );
+	my $mail = $self->param('mail') || 'false';
+	$self->redirect_to( '/auth/'.$mail.'/'.$mode );
 
 } => 'index';
 
-get '/auth/:mode'  => {mode => undef} => sub {
+get '/auth/:mail/:mode' => sub {
 	my $self = shift;
-	my $mode = $self->param('mode') || 'following';
-	my $cb_url = 'https://retrorocket.biz/list/auth.cgi/auth_cb/'.$mode;
+	my $mode = $self->param('mode');
+	my $mail = $self->param('mail');
+	my $cb_url = 'https://retrorocket.biz/list/auth.cgi/auth_cb/'.$mail.'/'.$mode;
 	my $url = $nt->get_authorization_url( callback => $cb_url );
 
 	$self->session( token => $nt->request_token );
@@ -37,9 +39,12 @@ get '/auth/:mode'  => {mode => undef} => sub {
 	$self->redirect_to( $url );
 } => 'auth';
 
-get '/auth_cb/:mode' => {mode => undef}  => sub {
+get '/auth_cb/:mail/:mode' => sub {
 	my $self = shift;
-	my $mode = $self->param('mode') || 'following';
+
+	my $mode = $self->param('mode');
+	my $mail = $self->param('mail');
+
 	my $verifier = $self->param('oauth_verifier') || '';
 	my $token = $self->session('token') || '';
 	my $token_secret = $self->session('token_secret') || '';
@@ -47,30 +52,34 @@ get '/auth_cb/:mode' => {mode => undef}  => sub {
 	$nt->request_token( $token );
 	$nt->request_token_secret( $token_secret );
 
-	# トークン取得
+	# Access token取得
 	my ($access_token, $access_token_secret, $user_id, $screen_name)
-		= $nt->request_access_token( verifier => $verifier );
+	= $nt->request_access_token( verifier => $verifier );
 
-	# セッションに格納
+	# Sessionに格納
 	$self->session( access_token => $access_token );
 	$self->session( access_token_secret => $access_token_secret );
 	$self->session( screen_name => $screen_name );
 
+	my $mail_mode = "?mail=".$mail;
+
+	my $r_url = "https://retrorocket.biz/list/list.cgi".$mail_mode;
+
 	if($mode ne 'following'){
-		$self->redirect_to( 'https://retrorocket.biz/list/list.cgi?mode=follower' );
+		$self->redirect_to( $r_url.'&mode=follower' );
 	}
 	else {
-		$self->redirect_to( 'https://retrorocket.biz/list/list.cgi' );
+		$self->redirect_to( $r_url );
 	}
 } => 'auth_cb';
 
-# セッション削除
+# Session削除
 get '/logout' => sub {
 	my $self = shift;
 	$self->session( expires => 1 );
+	#$self->render;
 } => 'logout';
 
-app->sessions->secure(1);
+app->sessions->secure(1); 
 app->secret("***"); # セッション管理のために付けておく
 app->start;
-
