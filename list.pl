@@ -76,7 +76,7 @@ post '/list' => sub {
 
 	if($mail_flag == 0){
 		$rand_num = int(rand 10000);
-		$filename = "/var/www/html/list/public/".$screen_name . $rand_num.".json";
+		$filename = "/".$screen_name . $rand_num.".json";
 
 		open(OUT, ">$filename");
 		my %trig = ();
