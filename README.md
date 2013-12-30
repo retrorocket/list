@@ -7,8 +7,6 @@ http://retrorocket.biz/list
 * ApacheのTimeoutによるプロセスkill回避のためにforkを使用しています。
 
 ##LICENSE
-BSD Licenseの範囲内で使用可能ですが、このソースコードのlist.pl/listメソッドを流用して新たにサービスを作成した場合、サービスのトップページのフッター等に、私（@retrorocket）の名前とこのリポジトリへのリンクを表示してください。
-
 Copyright (c) 2013, retrorocket
 All rights reserved.
 

@@ -14,7 +14,7 @@ use JSON;
 plugin 'mail';
 my $consumer_key ="***";
 my $consumer_secret = "***";
-my $from_address = "***@retrorocket.biz";
+my $from_address = "***\@retrorocket.biz";
 
 my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	consumer_key => $consumer_key,
@@ -65,6 +65,7 @@ post '/list' => sub {
 		else {
 			return $self->render(json =>{'result' => "fault", 'complete' => -1});
 		}
+		exit;
 	}
 
 	$nt->access_token( $access_token );
@@ -73,10 +74,14 @@ post '/list' => sub {
 	my $rand_num;
 	my $filename;
 	my $num;
+	my $list;
+	my $repeat = 0;
+	my $only_count = -1;
+	my @mem = ();
 
 	if($mail_flag == 0){
 		$rand_num = int(rand 10000);
-		$filename = "/".$screen_name . $rand_num.".json";
+		$filename = "/var/www/html/list/public/".$screen_name . $rand_num.".json";
 
 		open(OUT, ">$filename");
 		my %trig = ();
@@ -85,7 +90,6 @@ post '/list' => sub {
 		my $json_out = encode_json(\%trig);
 		print OUT $json_out;
 		close(OUT);
-
 	}
 
 	my $pid = fork;
@@ -106,94 +110,108 @@ post '/list' => sub {
 	else {
 		#子プロセス
 		close (STDOUT);
-		
-		eval {
+		do {
+			eval {
+				if($repeat == 0) {
+					$list = $nt->create_list({name=>'home_timeline_copy', mode=>'private', description =>"It\'s processing." });
+					$num = $list->{id_str};
+					sleep 2;
+				
+					my $hash;
+					if($mode eq 'follower'){
+						$hash = $nt->followers_ids({count=>4999});
+					}
+					else {
+						$hash = $nt->friends_ids({count=>4999});
+					}
+					@mem = @{$hash->{ids}};
 
-			my $list = $nt->create_list({name=>'home_timeline_copy', mode=>'private', description =>"It\'s processing." });
-			$num = $list->{id_str};
-			sleep 2;
-
-			my $hash;
-			if($mode eq 'follower'){
-				$hash = $nt->followers_ids({count=>4999});
-			}
-			else {
-				$hash = $nt->friends_ids({count=>4999});
-			}
-			my @mem = @{$hash->{ids}};
-
-			my $only_count = -1;
-			$nt->add_list_member({list_id=>$num, screen_name=>$screen_name});
-
-			while ($only_count != 0) {
-
-				my $magic = 50;
-				my $count = @mem;
-
-				my $hyaku = int($count / $magic);
-				my $amari = $count % $magic;
-
-				my $i = 0;
-				for($i = 0; $i < $hyaku; $i++){
-					eval {
-						my @temp = @mem[$i*$magic ... (($i+1)*$magic)-1];
-						my $str = join(',', @temp);
-						$nt->add_list_members({list_id=>$num, user_id=>$str});
-						sleep 1;
-					};
+					$nt->add_list_member({list_id=>$num, screen_name=>$screen_name});
 				}
-				if($amari > 0){
-					eval {
-						my @temp = @mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
-						my $str = join(',', @temp);
-						#print $str;
-						$nt->add_list_members({list_id=>$num, user_id=>$str});
-						sleep 1;
-					};
-				}
+
+				while ($only_count != 0) {
+	
+					my $magic = 50;
+					my $count = @mem;
+
+					my $hyaku = int($count / $magic);
+					my $amari = $count % $magic;
+
+					my $i = 0;
+					for($i = 0; $i < $hyaku; $i++){
+						eval {
+							my @temp = @mem[$i*$magic ... (($i+1)*$magic)-1];
+							my $str = join(',', @temp);
+							$nt->add_list_members({list_id=>$num, user_id=>$str});
+							sleep 1;
+						};
+					}
+					if($amari > 0){
+						eval {
+							my @temp = @mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
+							my $str = join(',', @temp);
+							#print $str;
+							$nt->add_list_members({list_id=>$num, user_id=>$str});
+							sleep 1;
+						};
+					}
 
 				#リストに登録できた勢
-				my $cursor = -1;
-				my $list_members = $nt->list_members({list_id => $num, cursor => $cursor});
+					my $cursor = -1;
+					my $list_members = $nt->list_members({list_id => $num, cursor => $cursor});
 
-				my @list_mem;
-				for my $a (@{$list_members->{users}}){
-					push(@list_mem,$a->{id});
-				}
-				$cursor = $list_members->{next_cursor};
-				while ($cursor != 0){
-					$list_members = $nt->list_members({list_id => $num, cursor => $cursor});
+					my @list_mem;
 					for my $a (@{$list_members->{users}}){
 						push(@list_mem,$a->{id});
 					}
 					$cursor = $list_members->{next_cursor};
+					while ($cursor != 0){
+						$list_members = $nt->list_members({list_id => $num, cursor => $cursor});
+						for my $a (@{$list_members->{users}}){
+							push(@list_mem,$a->{id});
+						}
+						$cursor = $list_members->{next_cursor};
+					}
+
+					my $lc = List::Compare->new(\@mem, \@list_mem);
+					my @only = $lc->get_Lonly;
+
+					$only_count = @only;
+
+					@mem = ();
+					@mem = @only;
 				}
-
-				my $lc = List::Compare->new(\@mem, \@list_mem);
-				my @only = $lc->get_Lonly;
-
-				$only_count = @only;
-
-				@mem = ();
-				@mem = @only;
+			};
+			if($@){
+				$repeat++;
+				if($mail_flag == 1 && $repeat == 1){
+					$self->mail(
+						to      => $sender_address,
+						subject => 'TimeLine Copier Result (on process)',
+						data    => "TimeLine Copierの処理が中断されました。15分後に処理を再開します。\n".$@ ,
+						from    => $from_address
+					);
+					sleep 900;
+				}
+				elsif ($mail_flag == 1 && $repeat > 1) {
+					$self->mail(
+						to      => $sender_address,
+						subject => 'TimeLine Copier Result (faulted)',
+						data    => "TimeLine Copierの処理に失敗しました。\n".$@ ,
+						from    => $from_address
+					);
+					$nt->update_list({list_id => $num, description => "error : ".$@});
+					$self->session( expires => 1 );
+					exit;
+				}
+				else {
+					unlink($filename);
+					$nt->update_list({list_id => $num, description => "error : ".$@});
+					$self->session( expires => 1 );
+					exit;
+				}
 			}
-		};
-		if($@){
-			$self->session( expires => 1 );
-			if($mail_flag == 1){
-				$self->mail(
-					to      => $sender_address,
-					subject => 'TimeLine Copier Result (faulted)',
-					data    => "TimeLine Copierの処理に失敗しました。Twitterを確認して下さい。\n".$@ ,
-					from    => $from_address
-				);
-			}
-			else {
-				unlink($filename);
-			}
-			$nt->update_list({list_id => $num, description => "error : ".$@});
-			exit;
-		}
+		} while($mail_flag == 1 && $repeat == 1);
 
 		if($mail_flag == 1){
 
