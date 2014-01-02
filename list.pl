@@ -71,7 +71,6 @@ post '/list' => sub {
 	$nt->access_token( $access_token );
 	$nt->access_token_secret( $access_token_secret );
 
-	my $rand_num;
 	my $filename;
 	my $num;
 	my $list;
@@ -79,30 +78,25 @@ post '/list' => sub {
 	my $only_count = -1;
 	my @mem = ();
 
-	if($mail_flag == 0){
-		$rand_num = int(rand 10000);
-		$filename = "/var/www/html/list/public/".$screen_name . $rand_num.".json";
-
-		open(OUT, ">$filename");
-		my %trig = ();
-		$trig{complete} = 0;
-		$trig{result} = "Processing";
-		my $json_out = encode_json(\%trig);
-		print OUT $json_out;
-		close(OUT);
+	$filename = "***/".$screen_name.".json";
+	if( -f $filename ) {
+		return $self->render(json =>{'result' => "fault", 'complete' => -2});
+		exit;
 	}
+	open(OUT, ">$filename");
+	my %trig = ();
+	$trig{complete} = 0;
+	$trig{result} = "Processing ...";
+	my $json_out = encode_json(\%trig);
+	print OUT $json_out;
+	close(OUT);
 
 	my $pid = fork;
 	die "fork fault: $!" unless defined $pid;
 
 	if($pid) {
-
 		# 親プロセス
-		if($mail_flag == 0){
-			return $self->render(json =>{'result' => $screen_name . $rand_num, 'complete' => 0 });
-		}
-		return $self->render(json =>{'result' => $screen_name });
-
+		return $self->render(json =>{'result' => $screen_name, 'complete' => 0 });
 		#意味は無いが念のため。
 		close (STDOUT);
 		exit;
@@ -180,6 +174,16 @@ post '/list' => sub {
 
 					@mem = ();
 					@mem = @only;
+
+					my $mem_count = @list_mem;
+					open(OUT, ">$filename");
+					my %trig = ();
+					$trig{complete} = 0;
+					$trig{result} = "Processing on ".$mem_count." members (left : ".$only_count." members)";
+					my $json_out = encode_json(\%trig);
+					print OUT $json_out;
+					close(OUT);
+	
 				}
 			};
 			if($@){
@@ -200,6 +204,7 @@ post '/list' => sub {
 						data    => "TimeLine Copierの処理に失敗しました。\n".$@ ,
 						from    => $from_address
 					);
+					unlink($filename);
 					$nt->update_list({list_id => $num, description => "error : ".$@});
 					$self->session( expires => 1 );
 					exit;
@@ -222,12 +227,10 @@ post '/list' => sub {
 				from    => $from_address
 			);
 		}
-		else {
-			unlink($filename);
-		}
+		unlink($filename);
 		$nt->update_list({list_id => $num, description => "succeed"});
 		$self->session( expires => 1 );
-		#return $self->render(json =>{'result' => 'done'});
+
 		exit;
 	}
 
