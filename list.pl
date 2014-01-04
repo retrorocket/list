@@ -71,14 +71,18 @@ post '/list' => sub {
 	$nt->access_token( $access_token );
 	$nt->access_token_secret( $access_token_secret );
 
+#	my $rand_num;
 	my $filename;
 	my $num;
 	my $list;
 	my $repeat = 0;
 	my $only_count = -1;
 	my @mem = ();
+	my $temp_only = -1;
+	my $temp_repeat = 0;
+	my $repeat_magic = 2;
 
-	$filename = "***/".$screen_name.".json";
+	$filename = "/***/".$screen_name.".json";
 	if( -f $filename ) {
 		return $self->render(json =>{'result' => "fault", 'complete' => -2});
 		exit;
@@ -87,10 +91,13 @@ post '/list' => sub {
 	my %trig = ();
 	$trig{complete} = 0;
 	$trig{result} = "Processing ...";
+	#$trig{rand} = $rand_num;
 	my $json_out = encode_json(\%trig);
 	print OUT $json_out;
+	#sleep 2;
 	close(OUT);
-
+	#sleep 2;
+	
 	my $pid = fork;
 	die "fork fault: $!" unless defined $pid;
 
@@ -113,17 +120,19 @@ post '/list' => sub {
 				
 					my $hash;
 					if($mode eq 'follower'){
-						$hash = $nt->followers_ids({count=>4999});
+						$hash = $nt->followers_ids({count=>4999, stringify_ids =>'true'});
 					}
 					else {
-						$hash = $nt->friends_ids({count=>4999});
+						$hash = $nt->friends_ids({count=>4999, stringify_ids=>'true'});
 					}
 					@mem = @{$hash->{ids}};
 
 					$nt->add_list_member({list_id=>$num, screen_name=>$screen_name});
 				}
 
-				while ($only_count != 0) {
+				while ($only_count != 0 && $temp_repeat < $repeat_magic) {
+
+					$temp_only = $only_count;
 	
 					my $magic = 50;
 					my $count = @mem;
@@ -156,13 +165,13 @@ post '/list' => sub {
 
 					my @list_mem;
 					for my $a (@{$list_members->{users}}){
-						push(@list_mem,$a->{id});
+						push(@list_mem,$a->{id_str});
 					}
 					$cursor = $list_members->{next_cursor};
 					while ($cursor != 0){
 						$list_members = $nt->list_members({list_id => $num, cursor => $cursor});
 						for my $a (@{$list_members->{users}}){
-							push(@list_mem,$a->{id});
+							push(@list_mem,$a->{id_str});
 						}
 						$cursor = $list_members->{next_cursor};
 					}
@@ -171,7 +180,8 @@ post '/list' => sub {
 					my @only = $lc->get_Lonly;
 
 					$only_count = @only;
-
+					if($only_count >= $temp_only) {$temp_repeat++;}
+					
 					@mem = ();
 					@mem = @only;
 
@@ -179,6 +189,7 @@ post '/list' => sub {
 					open(OUT, ">$filename");
 					my %trig = ();
 					$trig{complete} = 0;
+					$trig{repeat} = $temp_repeat;
 					$trig{result} = "Processing on ".$mem_count." members (left : ".$only_count." members)";
 					my $json_out = encode_json(\%trig);
 					print OUT $json_out;
@@ -218,6 +229,23 @@ post '/list' => sub {
 			}
 		} while($mail_flag == 1 && $repeat == 1);
 
+		if($temp_repeat >= $repeat_magic) {
+			if($mail_flag == 1){
+
+				$self->mail(
+					to      => $sender_address,
+					subject => 'TimeLine Copier Result (faulted)',
+					data    => $only_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした。Twitterを確認して下さい。" ,
+					from    => $from_address
+				);
+			}
+			unlink($filename);
+			$nt->update_list({list_id => $num, description => $only_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした"});
+			$self->session( expires => 1 );
+			#return $self->render(json =>{'result' => 'done'});
+			exit;
+		}
+
 		if($mail_flag == 1){
 
 			$self->mail(
@@ -230,7 +258,7 @@ post '/list' => sub {
 		unlink($filename);
 		$nt->update_list({list_id => $num, description => "succeed"});
 		$self->session( expires => 1 );
-
+		#return $self->render(json =>{'result' => 'done'});
 		exit;
 	}
 
