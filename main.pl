@@ -3,7 +3,6 @@
 use strict;
 use warnings;
 use utf8;
-#use bigint;
 
 use Scalar::Util 'blessed';
 use Net::Twitter::Lite::WithAPIv1_1;
@@ -35,6 +34,7 @@ my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 	ssl => 1
 );
 
+###登録失敗してるひとのリストを返す###
 sub getFaultedMember {
 	my $list_id = shift;
 	my $filename = shift;
@@ -75,7 +75,50 @@ sub getFaultedMember {
 	return @only;
 }
 
-# Display top page
+#######メイン処理#######
+sub mainFunc {
+
+	my $mem = shift;
+	my $list_id = shift;
+
+	my $magic = 50; #一度にリストにぶち込む人数
+	my $count = @$mem;
+
+	my $hyaku = int($count / $magic);
+	my $amari = $count % $magic;
+
+	#割り切れる分の処理
+	for(my $i = 0; $i < $hyaku; $i++){
+		eval {#この中の処理はエラー無視で進めさせる（無限ループはしないはず）
+			my @temp = @$mem[$i*$magic ... (($i+1)*$magic)-1];
+			my $str = join(',', @temp);
+			$nt->add_list_members({list_id=>$list_id, user_id=>$str});
+			sleep 1;
+		};
+		if( my $err = $@ ){ #ただしAPI切れか404なら死なす
+			die $@ unless blessed $err && $err->isa('Net::Twitter::Lite::Error');
+			my $error = $err->code;
+			if($error == 429 || $error == 404) { die $@; }
+		}
+	}
+	#端数
+	if($amari > 0){
+		eval {
+			my @temp = @$mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
+			my $str = join(',', @temp);
+			$nt->add_list_members({list_id=>$list_id, user_id=>$str});
+			sleep 1;
+		};
+		if( my $err = $@ ){
+			die $@ unless blessed $err && $err->isa('Net::Twitter::Lite::Error');
+			my $error = $err->code;
+			if($error == 429 || $error == 404) { die $@; }
+		}
+	}
+
+	return;
+}
+
 get '/' => sub {
 	my $self = shift;
 
@@ -96,7 +139,6 @@ get '/' => sub {
 	if($mail_mode) {return $self->render('mail');}
 
 } => 'index';
-
 
 get '/auth' => sub {
 	my $self = shift;
@@ -131,7 +173,7 @@ get '/auth_cb' => sub {
 	my ($access_token, $access_token_secret, $user_id, $screen_name)
 		= $nt->request_access_token( verifier => $verifier );
 
-	# セッションに格納
+	# Sessionに格納
 	$self->session( access_token => $access_token );
 	$self->session( access_token_secret => $access_token_secret );
 	$self->session( screen_name => $screen_name );
@@ -220,8 +262,7 @@ post '/list' => sub {
 	}
 
 	my $pid = fork();
-	die "fork fault: $!" unless defined $pid;
-
+	die("fork fault: $!") unless defined $pid;
 
 	if($pid) {
 		# 親プロセス
@@ -247,12 +288,10 @@ post '/list' => sub {
 			print OUT $json_out;
 		close(OUT);
 
-		#my $list;
 		my $list_id; #リストID
 		my @mem = (); #リスト登録対象
 
 		eval{
-
 			my $hash;
 			if($mode eq 'follower'){
 				$hash = $nt->followers_ids({count=>4999, stringify_ids =>'true'});
@@ -263,11 +302,15 @@ post '/list' => sub {
 			@mem = @{$hash->{ids}};
 
 			$list_id = $self->param('list_id') || '';
-			if( $list_id ){
+			
+			if( $list_id ){#既存リスト追記モード
 				my @only = &getFaultedMember($list_id, $filename, \@mem, 0);
 				sleep 1;
+
+				#リストとの差分
 				@mem = ();
 				@mem = @only;
+
 				$nt->update_list({list_id => $list_id, description => "It\'s processing." });
 				sleep 2;
 			}
@@ -306,36 +349,16 @@ post '/list' => sub {
 			eval {
 				my $temp_add_faulted_count = $add_faulted_count;
 
-				my $magic = 50; #一度にリストにぶち込む人数
-				my $count = @mem;
-
-				my $hyaku = int($count / $magic);
-				my $amari = $count % $magic;
-
-				#割り切れる分の処理
-				for(my $i = 0; $i < $hyaku; $i++){
-					eval {
-						my @temp = @mem[$i*$magic ... (($i+1)*$magic)-1];
-						my $str = join(',', @temp);
-						$nt->add_list_members({list_id=>$list_id, user_id=>$str});
-						sleep 1;
-					};
-				}
-				#端数
-				if($amari > 0){
-					eval {
-						my @temp = @mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
-						my $str = join(',', @temp);
-						#print $str;
-						$nt->add_list_members({list_id=>$list_id, user_id=>$str});
-						sleep 1;
-					};
-				}
+				#メイン処理
+				&mainFunc(\@mem, $list_id);
 
 				#リストに登録できた勢を計算する
 				my @only = &getFaultedMember($list_id, $filename, \@mem, $repeat_count);
 				$add_faulted_count = @only;
+				
+				#無限ループしそう判定
 				if($add_faulted_count >= $temp_add_faulted_count) {$repeat_count++;}
+
 				@mem = ();
 				@mem = @only;
 			};
@@ -356,7 +379,7 @@ post '/list' => sub {
 					next;
 				}
 				
-				#失敗しました
+				#失敗しました。手の施しようがない
 				if($mail_flag == 1) {
 					$self->mail(
 						to      => $sender_address,
@@ -365,9 +388,9 @@ post '/list' => sub {
 						from    => $from_address
 					);
 				}
-				$nt->update_list({list_id => $list_id, description => "error : ".$@});
-				#$self->session( expires => 1 );
 				unlink($filename);
+
+				$nt->update_list({list_id => $list_id, description => "error : ".$@});
 				close (SSTDIN);
 				close (STDOUT);
 				close (STDERR);
@@ -376,24 +399,26 @@ post '/list' => sub {
 		}
 
 		#無限ループしそうになった
+		my $ADD_FAULT_MESSAGE = $add_faulted_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした。Twitterを確認して下さい。";
 		if($repeat_count >= $REPEAT_MAGIC) {
 			if($mail_flag == 1){
 				$self->mail(
 					to      => $sender_address,
 					subject => $MAIL_FAULT_TITLE,
-					data    => $add_faulted_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした。Twitterを確認して下さい。" ,
+					data    => $ADD_FAULT_MESSAGE ,
 					from    => $from_address
 				);
 			}
-			$nt->update_list({list_id => $list_id, description => $add_faulted_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした"});
-
 			unlink($filename);
+
+			$nt->update_list({list_id => $list_id, description => $ADD_FAULT_MESSAGE});
 			close (SSTDIN);
 			close (STDOUT);
 			close (STDERR);
 			exit;
 		}
 
+		#処理完了
 		if($mail_flag == 1){
 			$self->mail(
 				to      => $sender_address,
@@ -402,9 +427,9 @@ post '/list' => sub {
 				from    => $from_address
 			);
 		}
-		$nt->update_list({list_id => $list_id, description => "succeed"});
-
 		unlink($filename);
+
+		$nt->update_list({list_id => $list_id, description => "succeed"});
 		close (SSTDIN);
 		close (STDOUT);
 		close (STDERR);
