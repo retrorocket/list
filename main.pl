@@ -3,6 +3,7 @@
 use strict;
 use warnings;
 use utf8;
+#use bigint;
 
 use Scalar::Util 'blessed';
 use Net::Twitter::Lite::WithAPIv1_1;
@@ -119,6 +120,7 @@ sub mainFunc {
 	return;
 }
 
+# index
 get '/' => sub {
 	my $self = shift;
 
@@ -222,8 +224,7 @@ post '/list' => sub {
 
 	#各種モード切り替え
 	my $mode = $self->session('mode') || '';
-	my $sender_address = $self->param('address') || 'false';
-	my $mail_flag = $sender_address ne "false" ? 1 : 0;
+	my $sender_address = $self->param('address') || '';
 
 	#メール用メッセージ
 	my $MAIL_FAULT_TITLE = "TimeLine Copier Result (faulted)";
@@ -237,7 +238,7 @@ post '/list' => sub {
 
 	#トークンなし
 	unless ($access_token && $access_token_secret) {
-		if($mail_flag == 1){
+		if($sender_address){
 			$self->mail(
 				to      => $sender_address,
 				subject => $MAIL_FAULT_TITLE,
@@ -301,6 +302,7 @@ post '/list' => sub {
 			}
 			@mem = @{$hash->{ids}};
 
+			#差分処理モード判定
 			$list_id = $self->param('list_id') || '';
 			
 			if( $list_id ){#既存リスト追記モード
@@ -324,7 +326,7 @@ post '/list' => sub {
 			$nt->add_list_member({list_id=>$list_id, screen_name=>$screen_name});
 		};
 		if($@){
-			if($mail_flag == 1){
+			if($sender_address){
 				$self->mail(
 					to      => $sender_address,
 					subject => $MAIL_FAULT_TITLE,
@@ -368,7 +370,7 @@ post '/list' => sub {
 				$error_count++;
 
 				#一回目のエラー、かつ404じゃないなら再開する
-				if($mail_flag == 1 && $error_count == 1 && $error != 404){
+				if($sender_address && $error_count == 1 && $error != 404){
 					$self->mail(
 						to      => $sender_address,
 						subject => $MAIL_PROCESS_TITLE,
@@ -380,7 +382,7 @@ post '/list' => sub {
 				}
 				
 				#失敗しました。手の施しようがない
-				if($mail_flag == 1) {
+				if($sender_address) {
 					$self->mail(
 						to      => $sender_address,
 						subject => $MAIL_FAULT_TITLE,
@@ -401,7 +403,7 @@ post '/list' => sub {
 		#無限ループしそうになった
 		my $ADD_FAULT_MESSAGE = $add_faulted_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした。Twitterを確認して下さい。";
 		if($repeat_count >= $REPEAT_MAGIC) {
-			if($mail_flag == 1){
+			if($sender_address){
 				$self->mail(
 					to      => $sender_address,
 					subject => $MAIL_FAULT_TITLE,
@@ -419,7 +421,7 @@ post '/list' => sub {
 		}
 
 		#処理完了
-		if($mail_flag == 1){
+		if($sender_address){
 			$self->mail(
 				to      => $sender_address,
 				subject => $MAIL_SUCCEED_TITLE,
@@ -442,7 +444,6 @@ post '/list' => sub {
 get '/logout' => sub {
 	my $self = shift;
 	$self->session( expires => 1 );
-	#$self->render;
 	return $self->render(json =>{'result' => "logout"});
 } => 'logout';
 
