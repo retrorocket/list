@@ -6,7 +6,6 @@ use utf8;
 
 use Scalar::Util 'blessed';
 use Net::Twitter::Lite::WithAPIv1_1;
-use Mojolicious::Lite;
 #use Data::Dumper;
 use List::Compare;
 use JSON;
