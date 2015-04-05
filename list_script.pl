@@ -10,13 +10,15 @@ use Net::Twitter::Lite::WithAPIv1_1;
 use List::Compare;
 use JSON;
 use Config::Pit;
+use MongoDB;
+use MongoDB::OID;
 
 # Config::Pit
 my $config = Config::Pit::get("list");
 
 # $list_id, $sender_addressは指定されなかった場合0
 my($access_token, $access_token_secret, $screen_name, $mode, $list_id, $sender_address) = @ARGV;
-my $filename = "/var/www/html/list/public/". $screen_name . ".json";
+#my $filename = "/var/www/html/list/public/". $screen_name . ".json";
 
 # Net::Twitter::Lite
 my $consumer_key = $config->{consumer_key};
@@ -29,6 +31,12 @@ my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 $nt->access_token( $access_token );
 $nt->access_token_secret( $access_token_secret );
 
+# MongoDB
+my $client = MongoDB::MongoClient->new;
+my $db = $client->get_database( $config->{data_base} );
+my $paste = $db->get_collection(  $config->{collection} );
+
+
 #メール用メッセージ
 #my $MAIL_FAULT_TITLE = "TimeLine Copier Result (faulted)";
 my $MAIL_FAULT_MESSAGE = "TimeLine Copierの処理に失敗しました。";
@@ -40,7 +48,7 @@ my $MAIL_SUCCEED_MESSAGE = "TimeLine Copierの処理が完了しました。Twit
 ###登録失敗してるひとのリストを返す###
 sub getFaultedMember {
 	my $list_id = shift;
-	my $filename = shift;
+	#my $filename = shift;
 	my $mem = shift;
 	my $repeat_count = shift;
 
@@ -66,15 +74,15 @@ sub getFaultedMember {
 	my $add_faulted_count = @only;
 	#JSON出力
 	my $mem_count = @list_mem;
-	open(OUT, ">$filename");
-		my %trig = ();
-		$trig{complete} = 0;
-		$trig{repeat} = $repeat_count;
-		$trig{result} = "Processing on ".$mem_count." members (left : ".$add_faulted_count." members)";
-		my $json_out = encode_json(\%trig);
-		print OUT $json_out;
-	close(OUT);
-
+#	open(OUT, ">$filename");
+#		my %trig = ();
+#		$trig{complete} = 0;
+#		$trig{repeat} = $repeat_count;
+#		$trig{result} = "Processing on ".$mem_count." members (left : ".$add_faulted_count." members)";
+#		my $json_out = encode_json(\%trig);
+#		print OUT $json_out;
+#	close(OUT);
+    $paste->update({"screen_name" => $screen_name}, {'$set' => {result => "Processing on ".$mem_count." members (left : ".$add_faulted_count." members)", complete => 1}});
 	return @only;
 }
 
@@ -124,13 +132,15 @@ sub mainFunc {
 }
 
 #処理開始JSON出力
-open(OUT, ">$filename");
-	my %trig = ();
-	$trig{complete} = 0;
-	$trig{result} = "Processing ...";
-	my $json_out = encode_json(\%trig);
-	print OUT $json_out;
-close(OUT);
+#open(OUT, ">$filename");
+#	my %trig = ();
+#	$trig{complete} = 0;
+#	$trig{result} = "Processing ...";
+#	my $json_out = encode_json(\%trig);
+#	print OUT $json_out;
+#close(OUT);
+
+$paste->update({"screen_name" => $screen_name}, {'$set' => {result => 'Processing...', complete => 1}});
 
 #my $list_id; #リストID
 my @mem = (); #リスト登録対象
@@ -147,7 +157,7 @@ eval{
 
 	#差分処理モード判定
 	if( $list_id ){#既存リスト追記モード
-		my @only = &getFaultedMember($list_id, $filename, \@mem, 0);
+		my @only = &getFaultedMember($list_id, \@mem, 0);
 		sleep 1;
 
 		#リストとの差分
@@ -166,14 +176,18 @@ eval{
 	#自分を入れておく
 	$nt->add_list_member({list_id=>$list_id, screen_name=>$screen_name});
 };
-if($@){
-	unlink($filename);
+if( my $err = $@ ){
+	#unlink($filename);
+    die $@ unless blessed $err && $err->isa('Net::Twitter::Lite::Error');
+    my $error_code = $err->code;
+    my $error_message = $err->error;
 	if($sender_address){
 		eval {
 			$nt->new_direct_message({user=>$screen_name, text=>$MAIL_FAULT_MESSAGE."\n".$@});
 		};
 		if($@) { warn ("[err_dm] ".$screen_name." : ". $@ . "\n"); }
 	}
+    $paste->update({"screen_name" => $screen_name}, {'$set' => {result => $error_message, complete => $error_code}});
 	exit 1;
 }
 
@@ -191,7 +205,7 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 		&mainFunc(\@mem, $list_id);
 
 		#リストに登録できた勢を計算する
-		my @only = &getFaultedMember($list_id, $filename, \@mem, $repeat_count);
+		my @only = &getFaultedMember($list_id, \@mem, $repeat_count);
 		$add_faulted_count = @only;
 
 		#無限ループしそう判定
@@ -201,8 +215,14 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 		@mem = @only;
 	};
 	if( my $err = $@ ){
-		die $@ unless blessed $err && $err->isa('Net::Twitter::Lite::Error');
+        # Twitter Errorじゃない場合おかしい使い方をされているので400で落とす。
+		unless (blessed $err && $err->isa('Net::Twitter::Lite::Error')) {
+            $paste->update({"screen_name" => $screen_name}, {'$set' => {result => "You sent Bad Request.", complete =>400 }});
+            warn ("[err_unknown] ".$screen_name." : ". $@ . "\n");
+            exit 1;
+        }
 		my $error = $err->code;
+        my $error_message = $err->error;
 		$error_count++;
 
 		#一回目のエラー、かつ404じゃないなら再開する
@@ -216,15 +236,19 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 		}
 
 		#失敗しました。手の施しようがない
-		unlink($filename);
+		#unlink($filename);
 		if($sender_address) {
 			eval {
 				$nt->new_direct_message({user=>$screen_name, text=>$MAIL_FAULT_MESSAGE ."\n".$@});
 			};
 			if($@) { warn ("[err_dm] ".$screen_name." : ". $@ . "\n"); }
 		}
-		warn ("[err] ".$screen_name." : ". $@);
-		$nt->update_list({list_id => $list_id, description => "error : ".$@});
+		warn ("[err] ".$screen_name." : ". $@ . "\n");
+		$paste->update({"screen_name" => $screen_name}, {'$set' => {result => $error_message, complete => $error}});
+        eval {
+		  $nt->update_list({list_id => $list_id, description => "error : ".$@});
+        };
+        if($@) { warn ("[err_update] ".$screen_name." : ". $@. "\n"); }
 		exit 1;
 	}
 }
@@ -232,26 +256,34 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 #無限ループしそうになった
 my $ADD_FAULT_MESSAGE = $add_faulted_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした。Twitterを確認して下さい。";
 if($repeat_count >= $REPEAT_MAGIC) {
-	unlink($filename);
+	#unlink($filename);
 	if($sender_address){
 		eval {
 			$nt->new_direct_message({user=>$screen_name, text=>$ADD_FAULT_MESSAGE});
 		};
 		if($@) { warn ("[err_dm] ".$screen_name." : ". $@); }
 	}
-	$nt->update_list({list_id => $list_id, description => $ADD_FAULT_MESSAGE});
-	print ("[info] " .$screen_name." : ". $ADD_FAULT_MESSAGE);
+    eval { 
+	   $nt->update_list({list_id => $list_id, description => $ADD_FAULT_MESSAGE});
+    };
+    if($@) { warn ("[err_update] ".$screen_name." : ". $@. "\n"); }
+    $paste->update({"screen_name" => $screen_name}, {'$set' => {result => $ADD_FAULT_MESSAGE, complete => -2}});
+    print ("[info] " .$screen_name." : ". $ADD_FAULT_MESSAGE. "\n");
 	exit 1;
 }
 
 #処理完了
-unlink($filename);
+#unlink($filename);
 if($sender_address){
 	eval {
 		$nt->new_direct_message({user=>$screen_name, text=>$MAIL_SUCCEED_MESSAGE});
 	};
 	if($@) { warn ("[err_dm] ".$screen_name." : ". $@ . "\n"); }
 }
-$nt->update_list({list_id => $list_id, description => "succeed"});
+eval { 
+    $nt->update_list({list_id => $list_id, description => "succeed"});
+};
+if($@) { warn ("[err_update] ".$screen_name." : ". $@. "\n"); }
+$paste->update({"screen_name" => $screen_name}, {'$set' => {result => "リストの作成が完了しました", complete => 200}});
 print ("[info] " .$screen_name." : complete.\n");
 exit 0;
