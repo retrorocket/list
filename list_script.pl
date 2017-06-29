@@ -37,10 +37,16 @@ my $db = $client->get_database( $config->{data_base} );
 my $paste = $db->get_collection(  $config->{collection} );
 
 
-#メール用メッセージ
+# メール用メッセージ
 my $MAIL_FAULT_MESSAGE = "TimeLine Copierの処理に失敗しました。";
 my $MAIL_PROCESS_MESSAGE = "TimeLine Copierの処理が中断されました。15分後に処理を再開します。";
 my $MAIL_SUCCEED_MESSAGE = "TimeLine Copierの処理が完了しました。Twitterを確認して下さい。";
+
+# 登録上限数
+my $LIMIT_NUM = 4999;
+
+# 今回リストに登録する人数
+my $FRIEND_NUM = 300;
 
 ###登録失敗してるひとのリストを返す###
 sub getFaultedMember {
@@ -50,15 +56,16 @@ sub getFaultedMember {
 	my $repeat_count = shift;
 
 	my $cursor = -1;
-	my $list_members = $nt->list_members({list_id => $list_id, cursor => $cursor, count=> 1000});
+	my $list_members = $nt->list_members({list_id => $list_id, cursor => $cursor, count=> $LIMIT_NUM});
 
 	my @list_mem;
 	for my $a (@{$list_members->{users}}){
 		push(@list_mem,$a->{id_str});
 	}
+	
 	$cursor = $list_members->{next_cursor};
 	while ($cursor != 0){
-		$list_members = $nt->list_members({list_id => $list_id, cursor => $cursor, count=> 1000});
+		$list_members = $nt->list_members({list_id => $list_id, cursor => $cursor, count=> $LIMIT_NUM});
 		for my $a (@{$list_members->{users}}){
 			push(@list_mem,$a->{id_str});
 		}
@@ -70,7 +77,7 @@ sub getFaultedMember {
 
 	my $add_faulted_count = @only;
 	my $mem_count = @list_mem;
-	$paste->update({"screen_name" => $screen_name}, {'$set' => {result => "Processing on ".$mem_count." members (left : ".$add_faulted_count." members)", complete => 1}});
+	$paste->update_one({"screen_name" => $screen_name}, {'$set' => {result => "Processing on ".$mem_count." members (left : ".$add_faulted_count." members)", complete => 1}});
 	return @only;
 }
 
@@ -81,7 +88,7 @@ sub mainFunc {
 	my $mem = shift;
 	my $list_id = shift;
 
-	my $magic = 50; #一度にリストにぶち込む人数
+	my $magic = 100; #一度にリストにぶち込む人数
 	my $count = @$mem;
 
 	my $hyaku = int($count / $magic);
@@ -93,13 +100,13 @@ sub mainFunc {
 			my @temp = @$mem[$i*$magic ... (($i+1)*$magic)-1];
 			my $str = join(',', @temp);
 			$nt->add_list_members({list_id=>$list_id, user_id=>$str});
-			sleep 1;
 		};
 		if( my $err = $@ ){ #ただしAPI切れか404なら死なす
 			die $@ unless blessed $err && $err->isa('Net::Twitter::Lite::Error');
 			my $error = $err->code;
 			if($error == 429 || $error == 404) { die $@; }
 		}
+		sleep 10;
 	}
 	#端数
 	if($amari > 0){
@@ -107,13 +114,13 @@ sub mainFunc {
 			my @temp = @$mem[$hyaku*$magic ... $hyaku*$magic+($amari-1)];
 			my $str = join(',', @temp);
 			$nt->add_list_members({list_id=>$list_id, user_id=>$str});
-			sleep 1;
 		};
 		if( my $err = $@ ){
 			die $@ unless blessed $err && $err->isa('Net::Twitter::Lite::Error');
 			my $error = $err->code;
 			if($error == 429 || $error == 404) { die $@; }
 		}
+		sleep 10;
 	}
 
 	return;
@@ -145,7 +152,7 @@ sub printLogger {
 }
 
 # 処理開始
-$paste->update({"screen_name" => $screen_name}, {'$set' => {result => 'Processing...', complete => 1}});
+$paste->update_one({"screen_name" => $screen_name}, {'$set' =>{result => 'Processing...', complete => 1}});
 
 #my $list_id; #リストID
 my @mem = (); #リスト登録対象
@@ -153,10 +160,10 @@ my @mem = (); #リスト登録対象
 eval{
 	my $hash;
 	if($mode eq 'follower'){
-		$hash = $nt->followers_ids({count=>4999, stringify_ids =>'true'});
+		$hash = $nt->followers_ids({count=>$LIMIT_NUM, stringify_ids =>'true'});
 	}
 	else {
-		$hash = $nt->friends_ids({count=>4999, stringify_ids=>'true'});
+		$hash = $nt->friends_ids({count=>$LIMIT_NUM, stringify_ids=>'true'});
 	}
 	@mem = @{$hash->{ids}};
 
@@ -179,7 +186,11 @@ eval{
 	}
 
 	#自分を入れておく
-	$nt->add_list_member({list_id=>$list_id, screen_name=>$screen_name});
+	eval {
+		unless($nt->account_settings->{"protected"}) {
+			$nt->add_list_member({list_id=>$list_id, screen_name=>$screen_name});
+		}
+	};
 };
 if( my $err = $@ ){
 	#unlink($filename);
@@ -188,15 +199,22 @@ if( my $err = $@ ){
 	my $error_message = $err->error;
 	if($sender_address){
 		eval {
-			$nt->new_direct_message({user=>$screen_name, text=>$MAIL_FAULT_MESSAGE."\n".$@});
+			$nt->new_direct_message({user=>$screen_name, text=>$MAIL_FAULT_MESSAGE."\n".$error_message});
 		};
 		if($@) {
 			&warnLogger("err_dm", $screen_name, $@);
 		}
 	}
-	$paste->update({"screen_name" => $screen_name}, {'$set' => {result => $error_message, complete => $error_code}});
+	$paste->update_one({"screen_name" => $screen_name}, {'$set' =>{result => $error_message, complete => $error_code}});
 	exit 1;
 }
+
+# リストから800人に絞る
+my $length = @mem;
+if($length > $FRIEND_NUM){
+    @mem = @mem[0..($FRIEND_NUM-1)];
+}
+
 
 my $error_count = 0; #APIエラー発生回数
 
@@ -224,7 +242,7 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 	if( my $err = $@ ){
 		# Twitter Errorじゃない場合おかしい使い方をされているので400で落とす。
 		unless (blessed $err && $err->isa('Net::Twitter::Lite::Error')) {
-			$paste->update({"screen_name" => $screen_name}, {'$set' => {result => "You sent Bad Request.", complete =>400 }});
+			$paste->update_one({"screen_name" => $screen_name}, {'$set' =>{result => "You sent Bad Request.", complete =>400 }});
 			&warnLogger("err_unknown", $screen_name, $@);
 			exit 1;
 		}
@@ -235,7 +253,7 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 		#一回目のエラー、かつ404じゃないなら再開する
 		if($sender_address && $error_count == 1 && $error != 404){
 			eval {
-				$nt->new_direct_message({user=>$screen_name, text=>$MAIL_PROCESS_MESSAGE."\n".$@});
+				$nt->new_direct_message({user=>$screen_name, text=>$MAIL_PROCESS_MESSAGE."\n".$error_message});
 			};
 			if($@) {
 				&warnLogger("err_dm", $screen_name, $@);
@@ -248,16 +266,16 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 		#unlink($filename);
 		if($sender_address) {
 			eval {
-				$nt->new_direct_message({user=>$screen_name, text=>$MAIL_FAULT_MESSAGE ."\n".$@});
+				$nt->new_direct_message({user=>$screen_name, text=>$MAIL_FAULT_MESSAGE ."\n".$error_message});
 			};
 			if($@) {
 				&warnLogger("err_dm", $screen_name, $@);
 			}
 		}
 		&warnLogger ("err", $screen_name, $error_message);
-		$paste->update({"screen_name" => $screen_name}, {'$set' => {result => $error_message, complete => $error}});
+		$paste->update_one({"screen_name" => $screen_name}, {'$set' =>{result => $error_message, complete => $error}});
 		eval {
-			$nt->update_list({list_id => $list_id, description => "error : ".$@});
+			$nt->update_list({list_id => $list_id, description => "error : ".$error_message});
 		};
 		if($@) {
 			&warnLogger ("err_update", $screen_name, $@);
@@ -267,7 +285,7 @@ while ($add_faulted_count != 0 && $repeat_count < $REPEAT_MAGIC) {
 }
 
 #無限ループしそうになった
-my $ADD_FAULT_MESSAGE = $add_faulted_count."名の存在しない・凍結された可能性のあるユーザをリストに登録できませんでした。Twitterを確認して下さい。";
+my $ADD_FAULT_MESSAGE = $add_faulted_count."名のユーザをリストに登録できませんでした。Twitterを確認して下さい。";
 if($repeat_count >= $REPEAT_MAGIC) {
 	#unlink($filename);
 	if($sender_address){
@@ -284,7 +302,7 @@ if($repeat_count >= $REPEAT_MAGIC) {
 	if($@) {
 		&warnLogger ("err_update", $screen_name, $@);
 	}
-	$paste->update({"screen_name" => $screen_name}, {'$set' => {result => $ADD_FAULT_MESSAGE, complete => -2}});
+	$paste->update_one({"screen_name" => $screen_name}, {'$set' =>{result => $ADD_FAULT_MESSAGE, complete => -2}});
 	&printLogger("info", $screen_name, $add_faulted_count."members faulted.");
 	exit 1;
 }
@@ -305,7 +323,6 @@ eval {
 if($@) {
 	&warnLogger ("err_update", $screen_name, $@);
 }
-$paste->update({"screen_name" => $screen_name}, {'$set' => {result => "リストの作成が完了しました", complete => 200}});
+$paste->update_one({"screen_name" => $screen_name},{'$set' =>{result => "リストの作成が完了しました", complete => 200}});
 &printLogger ("info", $screen_name, "complete");
 exit 0;
-
