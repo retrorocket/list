@@ -14,6 +14,8 @@ use MongoDB;
 use MongoDB::OID;
 use DateTime;
 
+use POSIX qw(strftime);
+
 # Config::Pit
 my $config = Config::Pit::get("list");
 
@@ -180,7 +182,8 @@ eval{
 		sleep 2;
 	}
 	else{
-		my $list = $nt->create_list({name=>'home_timeline_copy', mode=>'private', description =>"It\'s processing." });
+		my $today = my $today = strftime "%Y%m%d%H%M%S", localtime;
+		my $list = $nt->create_list({name=>'tl-'.$today, mode=>'private', description =>"It\'s processing." });
 		$list_id = $list->{id_str};
 		sleep 2;
 	}
