@@ -182,7 +182,7 @@ eval{
 		sleep 2;
 	}
 	else{
-		my $today = my $today = strftime "%Y%m%d%H%M%S", localtime;
+		my $today = strftime "%Y%m%d%H%M%S", localtime;
 		my $list = $nt->create_list({name=>'tl-'.$today, mode=>'private', description =>"It\'s processing." });
 		$list_id = $list->{id_str};
 		sleep 2;
