@@ -353,5 +353,5 @@ get '/logout' => sub {
 
 app->sessions->secure(1);
 app->sessions->cookie_name( $config->{session_name} );
-app->secrets( [ $config->{session_name} ] );    # セッション管理のために付けておく
+app->secrets( [$config->{session_secrets}] );    # セッション管理のために付けておく
 app->start;
