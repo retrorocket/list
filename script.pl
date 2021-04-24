@@ -8,20 +8,14 @@ use Net::Twitter::Lite::WithAPIv1_1;
 use Mojolicious::Lite;
 use Data::Dumper;
 use Config::Pit;
-use Mango;
-use Mango::BSON 'bson_oid';
+use MongoDB;
+use MongoDB::OID;
 
 # Config::Pit
 my $config = Config::Pit::get("list");
 
-helper mango => sub {
-    state $mango
-        = Mango->new( "mongodb://localhost:" . $config->{mongo_port} );
-};
-helper pastes => sub {
-    shift->mango->db( $config->{data_base} )
-        ->collection( $config->{collection} );
-};
+helper mango  => sub { state $mango = MongoDB::MongoClient->new };
+helper pastes => sub { shift->mango->get_database($config->{data_base})->get_collection($config->{collection}) };
 
 app->config(
     hypnotoad => {
@@ -311,7 +305,7 @@ post '/list' => sub {
     }
 
     #該当ID削除（なまえない人を指定したらどうなる？）
-    $self->pastes->remove( { screen_name => $screen_name } );
+    $self->pastes->delete_one( { screen_name => $screen_name } );
 
     #ID作成
     my $tokens = {
@@ -319,7 +313,7 @@ post '/list' => sub {
         #check_code => 1,
         screen_name => $screen_name,
     };
-    $self->pastes->insert($tokens);
+    $self->pastes->insert_one($tokens);
 
     #JSON出力用パス＆処理開始前判定
     #my $filename = app->home. "/public/".$screen_name.".json";
