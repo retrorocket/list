@@ -329,9 +329,9 @@ post '/list' => sub {
             . $screen_name . " "
             . $mode . " "
             . $list_id . " "
-            . $sender_address . " &>> "
+            . $sender_address . " > "
             . app->home
-            . "/log/list.log &" );
+            . "/log/list.log 2>&1 &" );
     $self->session( expires => 1 );
     return $self->render(
         json => { 'result' => $screen_name, 'complete' => 0 } );
